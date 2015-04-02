@@ -1,0 +1,8 @@
+.project
+.cproject
+.bier6*
+bier6.ko
+bier6.mod*
+*.o
+modules.order
+Module.*
