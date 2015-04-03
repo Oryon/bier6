@@ -8,109 +8,55 @@
 #include <linux/module.h>	/* Needed by all modules */
 #include <linux/kernel.h>	/* Needed for KERN_INFO */
 #include <linux/init.h>		/* Needed for the macros */
-#include <linux/netdevice.h>
-#include <linux/if_arp.h>
 
-#include <uapi/linux/if.h>
-#include <uapi/asm-generic/errno-base.h>
+#include <uapi/linux/in6.h>
+
+#include <net/ip.h>
+#include <net/ipv6.h>
+#include <net/route.h>
+#include <net/ip6_route.h>
+
+#include <linux/inet.h>
 
 #define DRIVER_AUTHOR "Pierre Pfister <pierre pfister@darou.fr>"
 #define DRIVER_DESC   "A simple IPv6 based BIER forwarder."
-#define NETDEV        "bier6"
 
-struct bier6_device {
-	int tx_count;
-	int rx_count;
-} *bier6_device;
+#include "bier6.h"
 
-static struct net_device *bier6_dev;
+static struct in6_addr ipdst = { { { 0x20,0x01,0xde,0xad,0,0,0,0,0,0,0,0,0,0,0,1 } } };
 
-static int bier6_netdev_up(struct net_device *dev)
+void bier6_ipv6_input(struct bier6_device *dev, struct sk_buff *old_skb)
 {
-	printk("bier6: Device is going up.\n");
-	netif_start_queue(dev);
-	return 0;
-}
+	const struct ipv6hdr *ip6h = ipv6_hdr(old_skb);
+	struct flowi6 fl6;
+	struct dst_entry *dst;
 
-static int bier6_netdev_down(struct net_device *dev)
-{
-	netif_stop_queue(dev);
-	return 0;
-}
+	memset(&fl6, 0, sizeof(fl6));
+	fl6.flowi6_proto = ip6h->nexthdr;
+	fl6.saddr = ip6h->saddr;
+	fl6.daddr = ipdst;
 
-void bier6_ipv6_input(struct sk_buff *old_skb)
-{
+	dst = ip6_route_output(dev_net(dev->dev), NULL, &fl6);
+	if (dst == NULL || dst->error) {
+		dst_release(dst);
+		kfree_skb(old_skb);
+		return;
+	}
 
-}
-
-static netdev_tx_t bier6_netdev_xmit(struct sk_buff *skb, struct net_device *dev)
-{
-	printk(KERN_INFO "bier6_netdev_xmit\n");
-
-	if(ntohs(skb->protocol) != ETH_P_IPV6)
-		goto out;
-
-	dev->stats.tx_packets++;
-	dev->stats.tx_bytes += skb->len;
-	bier6_ipv6_input(skb);
-
-out:
-	kfree_skb(skb);
-	return NETDEV_TX_OK;
-}
-
-static const struct net_device_ops bier6_netdev_ops = {
-//	.ndo_init	= ,	// Called at register_netdev
-//	.ndo_uninit	= ,	// Called at unregister_netdev
-	.ndo_open	= bier6_netdev_up,	// Called at ifconfig nat64 up
-	.ndo_stop	= bier6_netdev_down,	// Called at ifconfig nat64 down
-	.ndo_start_xmit	= bier6_netdev_xmit,	// REQUIRED, must return NETDEV_TX_OK
-//	.ndo_change_rx_flags = ,	// Called when setting promisc or multicast flags.
-//	.ndo_change_mtu = ,
-//	.net_device_stats = ,	// Called for usage statictics, if NULL dev->stats will be used.
-};
-
-void bier6_netdev_setup(struct net_device *dev)
-{
-	dev->netdev_ops = &bier6_netdev_ops;
-//	dev->destructor = nat64_netdev_free;
-
-	dev->type = ARPHRD_NONE;
-	dev->hard_header_len = 0;
-	dev->addr_len = 0;
-	dev->mtu = ETH_DATA_LEN;
-	dev->features = NETIF_F_NETNS_LOCAL;
-// | NETIF_F_NO_CSUM;
-	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
-
+	skb_dst_set(old_skb, dst);
+	dst_output(old_skb);
 }
 
 static int __init init_bier6(void)
 {
-	int err = -ENOMEM;
-
 	printk(KERN_INFO "Loading bier6 - Simple IPv6 BIER forwarder.\n");
-	bier6_dev = alloc_netdev(sizeof(struct bier6_device), NETDEV, bier6_netdev_setup);
-	if (bier6_dev == NULL)
-		goto out;
-
-	bier6_device = netdev_priv(bier6_dev);
-
-	if((err = register_netdev(bier6_dev)))
-		goto out_reg;
-
-	return 0;
-out_reg:
-	free_netdev(bier6_dev);
-out:
-	return err;
+	return bier6_netdev_init();
 }
 
 static void __exit cleanup_bier6(void)
 {
 	printk(KERN_INFO "Cleaning-up bier6 module\n");
-	unregister_netdev(bier6_dev);
-	free_netdev(bier6_dev);
+	bier6_netdev_term();
 }
 
 module_init(init_bier6);
