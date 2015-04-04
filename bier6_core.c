@@ -77,6 +77,7 @@ static int __init init_bier6(void)
 	if((err = bier6_netdev_init(&bier6_dev)))
 		return err;
 
+	bier6_dev_init();
 	bier6_fib_init(bier6_dev);
 
 	bier6_fib_set_bit(bier6_dev, 0, &ipdst1);
@@ -90,12 +91,13 @@ static void __exit cleanup_bier6(void)
 	printk(KERN_INFO "Cleaning-up bier6 module\n");
 	bier6_fib_term(bier6_dev);
 	bier6_netdev_term(bier6_dev);
+	bier6_dev_term();
 }
 
 module_init(init_bier6);
 module_exit(cleanup_bier6);
 
-MODULE_LICENSE("Proprietary");
+MODULE_LICENSE("GPL");
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);

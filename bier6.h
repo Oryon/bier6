@@ -33,6 +33,9 @@ struct bier6_device {
 int bier6_netdev_init(struct bier6_device **dev);
 void bier6_netdev_term(struct bier6_device *dev);
 
+int bier6_dev_init(void);
+void bier6_dev_term(void);
+
 void bier6_ipv6_input(struct bier6_device *dev, struct sk_buff *old_skb);
 
 void bier6_fib_init(struct bier6_device *dev);
