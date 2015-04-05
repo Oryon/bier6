@@ -16,10 +16,9 @@ static int bier6_major;
 static struct class *bier6_class = NULL;
 static struct device *bier6_device = NULL;
 
-
 static int bier6_dev_read(struct seq_file *m, void *v)
 {
-	return 0;
+	return seq_printf(m, "Coucou !\n Yeay\n");
 }
 
 static int bier6_dev_open(struct inode *inode, struct file *file)
@@ -27,44 +26,42 @@ static int bier6_dev_open(struct inode *inode, struct file *file)
 	return single_open(file, bier6_dev_read, NULL);
 }
 
-static long bier6_dev_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
-{
-	/*switch(cmd) {
-	case IOCTL_CMD:
-		printk(KERN_ALERT "\n %s \n", (char *)args);
-		break;
-	}*/
-	return 0;
-}
-
-static int bier6_dev_release(struct inode *inode, struct file *file)
-{
-	return 0;
-}
-
 static ssize_t bier6_dev_write(struct file *file, const char __user *buffer,
-                              size_t count, loff_t *ppos)
+					size_t count, loff_t *ppos)
 {
-	return -ENOMEM;
+	char *buf = NULL;
+	char *tail = NULL;
+
+	buf = kmalloc(sizeof(char) * (count + 1), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count)) {
+		kfree(buf);
+		return -EFAULT;
+	}
+	tail = buf;
+	buf[count] = '\0';
+
+	printk(KERN_ERR"Input: '%s'\n", buf);
+	kfree(buf);
+	return count;
 }
 
 static struct file_operations fops = {
 	.open           = bier6_dev_open,
-	.release        = bier6_dev_release,
+	.release        = single_release,
 	.read           = seq_read,
 	.llseek         = seq_lseek,
-	.write          = bier6_dev_write,
-	.unlocked_ioctl = bier6_dev_ioctl
+	.write          = bier6_dev_write
 };
 
 int bier6_dev_ctrl(int term)
 {
 	int retval = 0;
 
-	if(term) {
-		printk(KERN_ERR"failed to register device: error %d\n", bier6_major);
+	if(term)
 		goto term;
-	}
 
 	if ((bier6_major = register_chrdev(0, DEVICE_NAME, &fops)) < 0) {
 		printk(KERN_ERR"failed to register device: error %d\n", bier6_major);
