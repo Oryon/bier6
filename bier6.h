@@ -12,6 +12,8 @@
 #include <linux/list.h>
 #include <net/ipv6.h>
 
+#include <linux/seq_file.h>
+
 struct bier6_neigh {
 	struct list_head le;
 	struct in6_addr addr;
@@ -33,7 +35,7 @@ struct bier6_device {
 int bier6_netdev_init(struct bier6_device **dev);
 void bier6_netdev_term(struct bier6_device *dev);
 
-int bier6_dev_init(void);
+int bier6_dev_init(struct bier6_device *dev);
 void bier6_dev_term(void);
 
 void bier6_ipv6_input(struct bier6_device *dev, struct sk_buff *old_skb);
@@ -42,5 +44,6 @@ void bier6_fib_init(struct bier6_device *dev);
 void bier6_fib_term(struct bier6_device *dev);
 
 void bier6_fib_set_bit(struct bier6_device *dev, __u8 bitindex, struct in6_addr *dst);
+int bier6_fib_dump(struct bier6_device *dev, struct seq_file *m);
 
 #endif //BIER6_H

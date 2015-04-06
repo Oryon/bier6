@@ -48,12 +48,12 @@ static void bier6_fib_compile(struct bier6_device *dev)
 		if(dev->rib[i].set) {
 			rinfo = rt6_lookup(dev_net(dev->dev), &dev->rib[i].addr, NULL, 0, 0);
 			if(rinfo == NULL) {
-				printk(KERN_INFO "No route to dest\n");
+				printk(KERN_INFO "bier6_fib: No route to %pI6\n", &dev->rib[i].addr);
 			} else if (!(n = bier6_fib_goc(dev, &rinfo->rt6i_gateway, rinfo->rt6i_idev->dev->dev_id))) {
-				printk(KERN_INFO "Could not allocate memory\n");
+				printk(KERN_INFO "bier6_fib: Could not allocate memory\n");
 			} else {
 				n->bitmask |= cpu_to_be32(1 << i);
-				printk("Setting neighbor mask to %d\n", be32_to_cpu(n->bitmask));
+				printk("bier6_fib: Setting %pI6%%%s mask to %d\n", &n->addr, rinfo->rt6i_idev->dev->name, be32_to_cpu(n->bitmask));
 			}
 		}
 	}
@@ -61,6 +61,7 @@ static void bier6_fib_compile(struct bier6_device *dev)
 
 void bier6_fib_set_bit(struct bier6_device *dev, __u8 bitindex, struct in6_addr *dst)
 {
+	printk(KERN_INFO"bier6_fib_set_bit: bit %d addr %p\n", bitindex, dst);
 	if(dst) {
 		dev->rib[bitindex].set = 1;
 		dev->rib[bitindex].addr = *dst;
@@ -68,6 +69,20 @@ void bier6_fib_set_bit(struct bier6_device *dev, __u8 bitindex, struct in6_addr 
 		dev->rib[bitindex].set = 0;
 	}
 	bier6_fib_compile(dev);
+}
+
+int bier6_fib_dump(struct bier6_device *dev, struct seq_file *m)
+{
+	int i;
+	struct bier6_neigh *n;
+	for(i=0; i<RIB_BITS; i++)
+		if(dev->rib[i].set)
+			seq_printf(m, "bit %d %pI6\n", i, &dev->rib[i].addr);
+		else
+			seq_printf(m, "bit %d null\n", i);
+	list_for_each_entry(n, &dev->fib, le)
+		seq_printf(m, "fib %pI6%%%d %x\n", &n->addr, n->dev, be32_to_cpu(n->bitmask));
+	return 0;
 }
 
 void bier6_fib_init(struct bier6_device *dev)
