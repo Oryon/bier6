@@ -2,7 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
-#include <linux/device.h>
+#include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/inet.h>
@@ -12,11 +12,6 @@
 
 #define DEVICE_NAME "bier6"
 #define CLASS_NAME "bier6_class"
-
-static int bier6_major;
-static struct class *bier6_class = NULL;
-static struct device *bier6_device = NULL;
-static struct bier6_device *bier6_dev = NULL;
 
 int ipv6_parse_prefix(const char *str, struct in6_addr *prefix, u8 *plen) {
 	unsigned long int i;
@@ -38,34 +33,69 @@ int ipv6_parse_prefix(const char *str, struct in6_addr *prefix, u8 *plen) {
 	return 0;
 }
 
-char *next_token(char *str, char *end) {
-	while(str != end && *str == '\0')
-		++str;
-	while(str != end && *str != '\0')
-		++str;
-	while(str != end && *str == '\0')
-		++str;
-	return (str == end) ? NULL : str;
+static void prefix_canonize(struct in6_addr *p, u8 plen)
+{
+	u8 b = plen/8;
+	u8 r = plen%8;
+	if(b < 15)
+		memset(((u8*)p) + b + 1, 0, 16 - 1 - b);
+	((u8*)p)[b] &= (0xff << (8 - r));
+}
+
+int tokenize(char *str, char **tokens, int len)
+{
+	int tok = 0;
+	char *c = str;
+	int skip_word = 0;
+	while(*c != '\0') {
+		if(skip_word) {
+			if(*c == ' ' || *c == '\n') {
+				*c = '\0';
+				skip_word = 0;
+			}
+		} else {
+			if(*c == ' ' || *c == '\n') {
+
+			} else if(tok == len) {
+				return -EFBIG;
+			} else { //Found the next word
+				tokens[tok] = c;
+				tok++;
+				skip_word = 1;
+			}
+		}
+		c++;
+	}
+
+	for(;tok < len; tok++) {
+		tokens[tok] = NULL;
+	}
+	return 0;
 }
 
 static int bier6_dev_read(struct seq_file *m, void *v)
 {
-	return bier6_fib_dump(bier6_dev, m);
+	printk("bier6_dev_read\n");
+	return bier6_rib_dump((struct bier6 *) m->private, m);
 }
 
 static int bier6_dev_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, bier6_dev_read, NULL);
+	struct bier6 *b = container_of(inode->i_cdev, struct bier6, cdev);
+	return single_open(file, bier6_dev_read, b);
 }
 
 static ssize_t bier6_dev_write(struct file *file, const char __user *buffer,
 					size_t count, loff_t *ppos)
 {
+	struct bier6 *b = ((struct seq_file *)file->private_data)->private;
 	char *buf = NULL;
-	char *i;
-	char *tail = NULL;
-	struct in6_addr addr;
+	char *tokens[10];
+	struct in6_addr prefix, addr;
 	unsigned long int bit;
+	struct bier6_prefix *p;
+	u8 create, plen;
+	int err = 0;
 
 	if (!(buf = kmalloc(sizeof(char) * (count + 1), GFP_KERNEL)))
 		return -ENOMEM;
@@ -74,38 +104,52 @@ static ssize_t bier6_dev_write(struct file *file, const char __user *buffer,
 		kfree(buf);
 		return -EFAULT;
 	}
-	tail = buf + count;
-	*tail = '\0';
+	buf[count] = '\0';
 
-	for(i=buf; i!=tail; i++)
-		if(*i == ' ' || *i == '\n')
-			*i = '\0';
-
-	i = buf;
-	if(!strcmp(i, "bit")) {
-		if((i = next_token(i, tail)) &&
-				!kstrtoul(i, 10, &bit) &&
-				bit >= 0 && bit < RIB_BITS &&
-				(i = next_token(i, tail))) {
-			if(!strcmp(i, "null")) {
-				bier6_fib_set_bit(bier6_dev, bit, NULL);
-			} else if(!ipv6_parse_prefix(i, &addr, NULL)) {
-				bier6_fib_set_bit(bier6_dev, bit, &addr);
-			} else {
-				goto err;
-			}
-		} else {
-			goto err;
-		}
-	} else {
-		goto err;
+	if (tokenize(buf, tokens, 10) || !tokens[1] ||
+			strcmp(tokens[0], "rib")) {
+		err = -EINVAL;
+		goto out;
 	}
 
+	if(!strcmp(tokens[1], "add") || !strcmp(tokens[1], "del")) {
+		if(!tokens[2] || ipv6_parse_prefix(tokens[2], &prefix, &plen)) {
+			err = -EINVAL;
+			goto out;
+		}
+
+		create = !strcmp(tokens[1], "add");
+		prefix_canonize(&prefix, plen);
+		if(!(p = bier6_rib_prefix_goc(b, &prefix, plen, create))) {
+			err = create?-ENOMEM:0;
+			goto out;
+		}
+
+		if(!create)
+			bier6_rib_prefix_del(b, p);
+
+	} else if(!strcmp(tokens[1], "set")) {
+		if(!tokens[4] ||
+				ipv6_parse_prefix(tokens[2], &prefix, &plen) ||
+				kstrtoul(tokens[3], 10, &bit) || bit + plen >= 128 ||
+				((create = !!strcmp(tokens[4], "null")) &&
+						ipv6_parse_prefix(tokens[4], &addr, NULL))) {
+			err = -EINVAL;
+			goto out;
+		}
+		prefix_canonize(&prefix, plen);
+		if(!(p = bier6_rib_prefix_goc(b, &prefix, plen, 0))) {
+			err = create?-ENOMEM:-ENOENT;
+			goto out;
+		}
+
+		err = bier6_rib_bit_set(b, p, bit, create?&addr:NULL);
+	} else {
+		err = -EINVAL;
+	}
+out:
 	kfree(buf);
-	return count;
-err:
-	kfree(buf);
-	return -EIO;
+	return err?err:count;
 }
 
 static struct file_operations fops = {
@@ -116,51 +160,56 @@ static struct file_operations fops = {
 	.write          = bier6_dev_write
 };
 
-int bier6_dev_ctrl(int term)
+int bier6_dev_ctrl(struct bier6 *b, int term)
 {
 	int retval = 0;
 
 	if(term)
 		goto term;
 
-	if ((bier6_major = register_chrdev(0, DEVICE_NAME, &fops)) < 0) {
-		printk(KERN_ERR"failed to register device: error %d\n", bier6_major);
-		retval = bier6_major;
-		goto failed_chrdevreg;
+	if ((retval = alloc_chrdev_region(&b->devno, 0, 1, DEVICE_NAME)) < 0) {
+		printk(KERN_ERR"failed to register device number: error %d\n", retval);
+		goto err;
 	}
 
-	if (IS_ERR((bier6_class = class_create(THIS_MODULE, CLASS_NAME)))) {
-		printk(KERN_ERR"failed to register device class '%s'\n", CLASS_NAME);
-		retval = PTR_ERR(bier6_class);
-		goto failed_classreg;
+	if (IS_ERR((b->class = class_create(THIS_MODULE, CLASS_NAME)))) {
+		retval = PTR_ERR(b->class);
+		printk(KERN_ERR"failed to create class '%s': error %d\n", CLASS_NAME, retval);
+		goto err_class;
 	}
 
-	if (IS_ERR((bier6_device = device_create(bier6_class, NULL, MKDEV(bier6_major, 0), NULL, DEVICE_NAME)))) {
-		printk(KERN_ERR"failed to create device '%s'\n", DEVICE_NAME);
-		retval = PTR_ERR(bier6_device);
-		goto failed_devreg;
+	if (IS_ERR((b->chardev = device_create(b->class, NULL, b->devno, b, DEVICE_NAME)))) {
+		retval = PTR_ERR(b->chardev);
+		printk(KERN_ERR"failed to create device '%s': error %d\n", DEVICE_NAME, retval);
+		goto err_dev;
+	}
+
+	cdev_init(&b->cdev, &fops);
+	if ((retval = cdev_add(&b->cdev, b->devno, 1))) {
+		printk(KERN_ERR"failed to add cdev '%s': error %d\n", DEVICE_NAME, retval);
+		goto cdev_err;
 	}
 
 	return 0;
+
 term:
-	device_unregister(bier6_device);
-	device_destroy(bier6_class,MKDEV(bier6_major,0));
-failed_devreg:
-	class_unregister(bier6_class);
-	class_destroy(bier6_class);
-failed_classreg:
-	unregister_chrdev(bier6_major, DEVICE_NAME);
-failed_chrdevreg:
+	cdev_del(&b->cdev);
+cdev_err:
+	device_destroy(b->class, b->devno);
+err_dev:
+	class_destroy(b->class);
+err_class:
+	unregister_chrdev_region(b->devno, 1);
+err:
 	return retval;
 }
 
-int bier6_dev_init(struct bier6_device *dev)
+int bier6_dev_init(struct bier6 *b)
 {
-	bier6_dev = dev;
-	return bier6_dev_ctrl(0);
+	return bier6_dev_ctrl(b, 0);
 }
 
-void bier6_dev_term(void)
+void bier6_dev_term(struct bier6 *b)
 {
-	bier6_dev_ctrl(1);
+	bier6_dev_ctrl(b, 1);
 }

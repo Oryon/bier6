@@ -15,6 +15,8 @@
 
 #define NETDEV        "bier6"
 
+#define bier6_netdev_priv(dev) (*((struct bier6 **)netdev_priv(dev)))
+
 static int bier6_netdev_up(struct net_device *dev)
 {
 	printk("bier6: Device is going up.\n");
@@ -37,7 +39,7 @@ static netdev_tx_t bier6_netdev_xmit(struct sk_buff *skb, struct net_device *dev
 
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += skb->len;
-	bier6_ipv6_input(netdev_priv(dev), skb);
+	bier6_ipv6_input(bier6_netdev_priv(dev), skb);
 
 out:
 	return NETDEV_TX_OK;
@@ -58,7 +60,6 @@ void bier6_netdev_setup(struct net_device *dev)
 {
 	dev->netdev_ops = &bier6_netdev_ops;
 //	dev->destructor = nat64_netdev_free;
-
 	dev->type = ARPHRD_NONE;
 	dev->hard_header_len = 0;
 	dev->addr_len = 0;
@@ -68,31 +69,25 @@ void bier6_netdev_setup(struct net_device *dev)
 	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
 }
 
-int bier6_netdev_init(struct bier6_device **dev)
+int bier6_netdev_init(struct bier6 *b)
 {
-	struct net_device *netdev;
-	int err = -ENOMEM;
-	netdev = alloc_netdev(sizeof(struct bier6_device), NETDEV, bier6_netdev_setup);
-	if (netdev == NULL)
-		goto out;
+	int err;
+	if ((b->netdev = alloc_netdev(sizeof(b), NETDEV, bier6_netdev_setup)) == NULL)
+		return -ENOMEM;
 
-	*dev = netdev_priv(netdev);
-	(*dev)->dev = netdev;
+	if((err = register_netdev(b->netdev)))  {
+		free_netdev(b->netdev);
+		return err;
+	}
 
-	if((err = register_netdev(netdev)))
-		goto out_reg;
-
+	*((struct bier6 **)netdev_priv(b->netdev)) = b;
 	return 0;
-out_reg:
-	free_netdev(netdev);
-out:
-	return err;
 }
 
-void bier6_netdev_term(struct bier6_device *dev)
+void bier6_netdev_term(struct bier6 *b)
 {
-	unregister_netdev(dev->dev);
-	free_netdev(dev->dev);
+	unregister_netdev(b->netdev);
+	free_netdev(b->netdev);
 }
 
 
