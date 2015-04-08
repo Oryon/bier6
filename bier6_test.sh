@@ -5,26 +5,33 @@
 
 cd `dirname $0`
 
+if [ "$1" = "up" ]; then
+	make
+	sudo insmod bier6.ko
+	sudo chmod a+rw /dev/bier6
 
+	sudo ip netns add out
+	sudo ip link add veth0 type veth peer name veth1
+	sudo ip link set veth1 netns out
 
+	sudo ip link set veth0 up
+	sudo ip -6 addr add 2001:dead:3::2/64 dev veth0
+	sudo ip -6 route add default via 2001:dead:3::1 dev veth0
 
-make || exit 1
-sudo rmmod bier6
-sudo insmod bier6.ko || exit 1 
-sudo chmod a+rw /dev/bier6
+	sudo ip netns exec out ip link set lo up
+	sudo ip netns exec out ip link set veth1 up
+	sudo ip netns exec out ip -6 addr add 2001:dead:3::1/64 dev veth1
+	sudo ip netns exec out ip -6 addr add 2001:f00d::2/128 dev lo
 
-sudo ip link set bier6 up || exit 1
-sudo ip -6 route add 2001:f00d::/64 dev bier6
-sudo ip -6 route add 2001:dead:1::/64 dev eth0 via fe80::1:12
-sudo ip -6 route add 2001:dead:2::/64 dev eth0 via fe80::2:12
+	echo "rib add 2001:f00d::/64" > /dev/bier6
+	echo "rib set 2001:f00d::/64 0 ::1" > /dev/bier6
+	echo "rib set 2001:f00d::/64 1 2001:dead:3::1" > /dev/bier6
+	echo "rib set 2001:f00d::/64 2 2001:dead:ffff::1" > /dev/bier6
 
-echo "rib add 2001:f00d::/64" > /dev/bier6
-echo "rib set 2001:f00d::/64 0 ::1" > /dev/bier6
-echo "rib set 2001:f00d::/64 1 2001:dead:1::1" > /dev/bier6
-echo "rib set 2001:f00d::/64 2 2001:dead:2::1" > /dev/bier6
-
-sleep 1
-
-ping6 2001:f00d::7
-
-sudo rmmod bier6
+	echo "---------------------------------------"
+	cat /dev/bier6
+elif [ "$1" = "down" ]; then
+	sudo rmmod bier6
+	sudo ip netns del out
+	sudo ip link del veth0
+fi

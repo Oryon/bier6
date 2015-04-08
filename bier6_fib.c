@@ -49,6 +49,7 @@ static int bier6_fib_prefix_compile(struct bier6 *b, struct bier6_prefix *p)
 		} else if (!(fe = bier6_fib_entry_goc(p, &rinfo->rt6i_gateway, rinfo->rt6i_idev->dev->dev_id))) {
 			printk(KERN_INFO "bier6_fib: Could not allocate memory\n");
 			bier6_fib_prefix_flush(b, p);
+			dst_release(&rinfo->dst); //rinfo and dst are freed this way (see rt6_lookup)
 			return -ENOMEM;
 		} else {
 			if(re->index >= 64) {
