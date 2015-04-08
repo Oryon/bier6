@@ -15,17 +15,18 @@
 
 #define NETDEV        "bier6"
 
-#define bier6_netdev_priv(dev) (*((struct bier6 **)netdev_priv(dev)))
+#define bier6_netdev_priv(dev) (*((struct bier6_dev **)netdev_priv(dev)))
 
 static int bier6_netdev_up(struct net_device *dev)
 {
-	printk("bier6: Device is going up.\n");
+	printk("bier6: Device %s is going up.\n", dev->name);
 	netif_start_queue(dev);
 	return 0;
 }
 
 static int bier6_netdev_down(struct net_device *dev)
 {
+	printk("bier6: Device %s is going down.\n", dev->name);
 	netif_stop_queue(dev);
 	return 0;
 }
@@ -64,30 +65,62 @@ void bier6_netdev_setup(struct net_device *dev)
 	dev->hard_header_len = 0;
 	dev->addr_len = 0;
 	dev->mtu = ETH_DATA_LEN;
-	dev->features = NETIF_F_NETNS_LOCAL;
+	dev->features = 0;
+	//dev->features = NETIF_F_NETNS_LOCAL;
 // | NETIF_F_NO_CSUM;
 	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
 }
 
-int bier6_netdev_init(struct bier6 *b)
+static int bier6_netdev_ctrl(struct bier6 *b, char *devname,
+		int create, struct bier6_dev **dev, int term)
 {
-	int err;
-	if ((b->netdev = alloc_netdev(sizeof(b), NETDEV, bier6_netdev_setup)) == NULL)
+	int err = 0;
+	if(term)
+		goto term;
+
+	list_for_each_entry((*dev), &b->devices, le)
+		if(!strcmp(devname, (*dev)->netdev->name))
+			return 0;
+
+	if(!create)
+		return -ENODEV;
+
+	if((*dev = kmalloc(sizeof(**dev), GFP_KERNEL)) == NULL)
 		return -ENOMEM;
 
-	if((err = register_netdev(b->netdev)))  {
-		free_netdev(b->netdev);
-		return err;
+	if (((*dev)->netdev = alloc_netdev(sizeof(*dev),
+			devname, bier6_netdev_setup)) == NULL) {
+		err = -ENOMEM;
+		goto err_alloc;
 	}
 
-	*((struct bier6 **)netdev_priv(b->netdev)) = b;
+	if((err = register_netdev((*dev)->netdev)))
+		goto err_register;
+
+	(*dev)->bier = b;
+	*((struct bier6_dev **)netdev_priv((*dev)->netdev)) = *dev;
+	list_add(&(*dev)->le, &b->devices);
+	INIT_LIST_HEAD(&(*dev)->prefixes);
 	return 0;
+
+term:
+	bier6_rib_flush(*dev);
+	list_del(&(*dev)->le);
+	unregister_netdev((*dev)->netdev);
+err_register:
+	free_netdev((*dev)->netdev);
+err_alloc:
+	kfree(*dev);
+err_kmalloc:
+	return err;
 }
 
-void bier6_netdev_term(struct bier6 *b)
+int bier6_netdev_goc(struct bier6 *b, char *devname, int create, struct bier6_dev **dev)
 {
-	unregister_netdev(b->netdev);
-	free_netdev(b->netdev);
+	return bier6_netdev_ctrl(b, devname, create, dev, 0);
 }
 
-
+void bier6_netdev_destroy(struct bier6_dev *dev)
+{
+	bier6_netdev_ctrl(dev->bier, NULL, 0, &dev, 1);
+}

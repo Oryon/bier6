@@ -39,36 +39,37 @@ struct bier6_prefix {
 	struct list_head fib;
 };
 
-struct bier6 {
-	/* Network device */
+struct bier6_dev {
+	struct list_head le;
+	struct bier6 *bier;
 	struct net_device *netdev;
+	struct list_head prefixes;
+};
+
+struct bier6 {
+	/* Network devices */
+	struct list_head devices;
 
 	/* Character device */
 	dev_t devno;
 	struct class *class;
 	struct device *chardev;
 	struct cdev cdev;
-
-	/* List of BIER prefixes */
-	struct list_head prefixes;
 };
 
-int bier6_netdev_init(struct bier6 *b);
-void bier6_netdev_term(struct bier6 *b);
+int bier6_netdev_goc(struct bier6 *b, char *devname, int create, struct bier6_dev **dev);
+void bier6_netdev_destroy(struct bier6_dev *dev);
 
 int bier6_dev_init(struct bier6 *b);
 void bier6_dev_term(struct bier6 *b);
 
-void bier6_ipv6_input(struct bier6 *b, struct sk_buff *skb);
+void bier6_ipv6_input(struct bier6_dev *dev, struct sk_buff *skb);
 
-void bier6_rib_init(struct bier6 *b);
-void bier6_rib_flush(struct bier6 *b);
-void bier6_rib_term(struct bier6 *b);
-
-struct bier6_prefix *bier6_rib_prefix_goc(struct bier6 *b,
+void bier6_rib_flush(struct bier6_dev *dev);
+struct bier6_prefix *bier6_rib_prefix_goc(struct bier6_dev *dev,
 		struct in6_addr *addr, u8 plen, int create);
-void bier6_rib_prefix_del(struct bier6 *b, struct bier6_prefix *p);
-int bier6_rib_bit_set(struct bier6 *b, struct bier6_prefix *p,
+void bier6_rib_prefix_del(struct bier6_dev *dev, struct bier6_prefix *p);
+int bier6_rib_bit_set(struct bier6_dev *dev, struct bier6_prefix *p,
 		u8 index, struct in6_addr *dst);
 
 int bier6_rib_dump(struct bier6 *b, struct seq_file *m);

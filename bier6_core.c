@@ -35,7 +35,7 @@ static int prefix_contains(struct in6_addr *p, u8 plen, struct in6_addr *addr)
 }
 */
 
-void bier6_ipv6_forward(struct bier6 *b,
+void bier6_ipv6_forward(struct bier6_dev *dev,
 		struct bier6_prefix *p, struct in6_addr *daddr,
 		struct sk_buff *old_skb)
 {
@@ -44,35 +44,50 @@ void bier6_ipv6_forward(struct bier6 *b,
 	struct rt6_info *rinfo;
 	struct in6_addr daddr2;
 
+	struct flowi6 fl6;
+	struct dst_entry *dst;
+
 	list_for_each_entry(fe, &p->fib, le) {
 		if(!(IN6_64(daddr, 0) & IN6_64(&fe->mask, 0)) &&
 				!(IN6_64(daddr, 1) & IN6_64(&fe->mask, 1)))
 			continue;
 
 		printk("Sending a packet maybe with mask %pI6\n", &fe->mask);
-
-		if((rinfo = rt6_lookup(dev_net(b->netdev), &fe->addr, NULL, fe->dev, 0)) == NULL)
+/*
+		if((rinfo = rt6_lookup(dev_net(dev->netdev), &fe->addr, NULL, fe->dev, 0)) == NULL) {
+			printk("Unreachable\n");
 			continue; //Unreachable
+		}
+		*/
+
+		fl6.daddr = fe->addr;
+		fl6.__fl_common.flowic_oif = fe->dev;
+
+		if(!(dst = ip6_route_output(dev_net(dev->netdev), NULL, &fl6)))
+			continue;
 
 		if(!(skb = skb_copy(old_skb, GFP_KERNEL))) {
-			dst_release(&rinfo->dst);
+			printk("skb_copy failed\n");
+			//dst_release(&rinfo->dst);
+			dst_release(dst);
 			continue;
 		}
 
 		IN6_64(&daddr2, 0) = IN6_64(daddr, 0) & (IN6_64(&fe->mask, 0) | IN6_64(&p->mask, 0));
 		IN6_64(&daddr2, 1) = IN6_64(daddr, 1) & (IN6_64(&fe->mask, 1) | IN6_64(&p->mask, 1));
 
-		//printk("Destination set to %pI6 = %pI6 & (%pI6 | %pI6)\n", &daddr2, );
+		printk("Destination set to %pI6 = %pI6 & (%pI6 | %pI6)\n", &daddr2, daddr, &fe->mask, &p->mask);
 		ipv6_hdr(skb)->daddr = daddr2;
 		skb->ip_summed = CHECKSUM_PARTIAL;
-		skb_dst_set(skb, &rinfo->dst);
+		//skb_dst_set(skb, &rinfo->dst);
+		skb_dst_set(skb, dst);
 		dst_output(skb);
 	}
 
 	kfree_skb(old_skb);
 }
 
-void bier6_ipv6_input(struct bier6 *b, struct sk_buff *old_skb)
+void bier6_ipv6_input(struct bier6_dev *dev, struct sk_buff *old_skb)
 {
 	struct in6_addr daddr = ipv6_hdr(old_skb)->daddr;
 	struct bier6_prefix *p;
@@ -86,15 +101,15 @@ void bier6_ipv6_input(struct bier6 *b, struct sk_buff *old_skb)
 	}
 	ipv6_hdr(old_skb)->hop_limit--;
 
-	list_for_each_entry(p, &b->prefixes, le) {
-		printk("(%pI6 ^ %pI6) & %pI6", &daddr, &p->prefix, &p->mask);
+	list_for_each_entry(p, &dev->prefixes, le) {
+		printk("(%pI6 ^ %pI6) & %pI6\n", &daddr, &p->prefix, &p->mask);
 		if(((IN6_64(&daddr, 0) ^ IN6_64(&p->prefix, 0)) &
 				IN6_64(&p->mask, 0)) ||
 			((IN6_64(&daddr, 1) ^ IN6_64(&p->prefix, 1)) &
 				IN6_64(&p->mask, 1)))
 			continue;
 
-		bier6_ipv6_forward(b, p, &daddr, old_skb);
+		bier6_ipv6_forward(dev, p, &daddr, old_skb);
 		return;
 	}
 
@@ -104,26 +119,19 @@ void bier6_ipv6_input(struct bier6 *b, struct sk_buff *old_skb)
 
 static int __init init_bier6(void)
 {
-	int err;
 	printk(KERN_INFO "Loading bier6 - Simple IPv6 BIER forwarder.\n");
-	if((err = bier6_netdev_init(&bier)))
-		return err;
-
-	bier6_rib_init(&bier);
-	if((err = bier6_dev_init(&bier))) {
-		bier6_netdev_term(&bier);
-		return err;
-	}
-
-	return 0;
+	INIT_LIST_HEAD(&bier.devices);
+	return bier6_dev_init(&bier);
 }
 
 static void __exit cleanup_bier6(void)
 {
+	struct bier6_dev *dev, *d2;
 	printk(KERN_INFO "Cleaning-up bier6 module\n");
+	list_for_each_entry_safe(dev, d2, &bier.devices, le)
+		bier6_netdev_destroy(dev);
+
 	bier6_dev_term(&bier);
-	bier6_rib_term(&bier);
-	bier6_netdev_term(&bier);
 }
 
 module_init(init_bier6);
