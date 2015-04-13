@@ -8,12 +8,17 @@ usage () {
 bier6 show
 	Dump bier6 configuration.
 
-bier6 rib <device> [add|del] <prefix>
-	Adds or remove a rib entry for the given prefix.
+bier6 dev [add|del] <device>
+	Create or destroy a bier device.
 
-bier6 rib <device> set <prefix> <n> [<address>|null]
-	Set or unset the n'th address used for bier-based 
-	forwarding. Bit count starts from lowest significance.
+bier6 rib <device> [add|del] <prefix> [<destination>]
+	Create or destroy a bier routing entry. Most significant
+	prefix bits are used for data packet matching. Less
+	significant prefix bits are the bier bits, used for bier
+	forwarding.
+
+bier6 help
+	Prints this message.
 EOF
 	exit $1
 }
