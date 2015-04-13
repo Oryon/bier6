@@ -1,12 +1,9 @@
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
-
-#include <linux/cdev.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-#include <linux/inet.h>
-#include <uapi/asm-generic/errno-base.h>
+/*
+ * Author: Pierre Pfister <pierre pfister@darou.fr>
+ *
+ * Copyright (c) 2014 Cisco Systems, Inc.
+ *
+ */
 
 #include "bier6.h"
 

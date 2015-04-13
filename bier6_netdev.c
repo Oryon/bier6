@@ -5,15 +5,7 @@
  *
  */
 
-#include <linux/netdevice.h>
-#include <linux/if_arp.h>
-
-#include <uapi/linux/if.h>
-#include <uapi/asm-generic/errno-base.h>
-
 #include "bier6.h"
-
-#define NETDEV        "bier6"
 
 #define bier6_netdev_priv(dev) (*((struct bier6_dev **)netdev_priv(dev)))
 
@@ -33,8 +25,6 @@ static int bier6_netdev_down(struct net_device *dev)
 
 static netdev_tx_t bier6_netdev_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	printk(KERN_INFO "bier6_netdev_xmit\n");
-
 	if(ntohs(skb->protocol) != ETH_P_IPV6)
 		goto out;
 

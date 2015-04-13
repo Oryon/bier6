@@ -8,12 +8,13 @@
 #ifndef BIER6_H
 #define BIER6_H
 
-#include <linux/types.h>
-#include <linux/list.h>
-#include <net/ipv6.h>
-
-#include <linux/seq_file.h>
+#include <uapi/asm-generic/errno-base.h>
 #include <linux/cdev.h>
+#include <linux/inet.h>
+#include <linux/list.h>
+#include <linux/seq_file.h>
+#include <linux/types.h>
+#include <net/ipv6.h>
 
 #define IN6_64(p, i) ((u64 *)(p))[i]
 

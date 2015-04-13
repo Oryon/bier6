@@ -5,18 +5,11 @@
  *
  */
 
-#include <linux/module.h>	/* Needed by all modules */
-#include <linux/kernel.h>	/* Needed for KERN_INFO */
-#include <linux/init.h>		/* Needed for the macros */
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
 
-#include <uapi/linux/in6.h>
-
-#include <net/ip.h>
-#include <net/ipv6.h>
-#include <net/route.h>
 #include <net/ip6_route.h>
-
-#include <linux/inet.h>
 
 #define DRIVER_AUTHOR "Pierre Pfister <pierre pfister@darou.fr>"
 #define DRIVER_DESC   "A simple IPv6 based BIER forwarder."
@@ -30,7 +23,6 @@ static int bier6_ipv6_output(struct bier6_dev *dev,
 {
 	struct flowi6 fl6;
 	struct dst_entry *dst;
-	struct rt6_info *rt;
 
 	fl6 = (struct flowi6) {
 		.flowi6_oif = fe->device->ifindex,
@@ -43,12 +35,9 @@ static int bier6_ipv6_output(struct bier6_dev *dev,
 		return -1;
 	}
 
-	printk("skb_dev: %s dst_dev: %s\n", skb->dev->name, dst->dev->name);
-	rt = container_of(dst, struct rt6_info, dst);
-
 	skb->dev = dst->dev;
-	skb_dst_drop(skb);
 	skb_dst_set(skb, dst);
+	skb_dst_drop(skb);
 	dst_output(skb);
 	return 0;
 }

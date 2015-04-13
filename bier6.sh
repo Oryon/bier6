@@ -17,6 +17,9 @@ bier6 rib <device> [add|del] <prefix> [<destination>]
 	significant prefix bits are the bier bits, used for bier
 	forwarding.
 
+bier6 rib <device> flush
+	Remove all bier routing entries from the bier device.
+
 bier6 help
 	Prints this message.
 EOF
