@@ -33,15 +33,6 @@ int ipv6_parse_prefix(const char *str, struct in6_addr *prefix, u8 *plen) {
 	return 0;
 }
 
-static void prefix_canonize(struct in6_addr *p, u8 plen)
-{
-	u8 b = plen/8;
-	u8 r = plen%8;
-	if(b < 15)
-		memset(((u8*)p) + b + 1, 0, 16 - 1 - b);
-	((u8*)p)[b] &= (0xff << (8 - r));
-}
-
 int tokenize(char *str, char **tokens, int len)
 {
 	int tok = 0;
@@ -76,7 +67,7 @@ int tokenize(char *str, char **tokens, int len)
 static int bier6_dev_read(struct seq_file *m, void *v)
 {
 	printk("bier6_dev_read\n");
-	return bier6_rib_dump((struct bier6_dev *) m->private, m);
+	return bier6_rib_dump((struct bier6 *) m->private, m);
 }
 
 static int bier6_dev_open(struct inode *inode, struct file *file)
@@ -92,10 +83,8 @@ static ssize_t bier6_dev_write(struct file *file, const char __user *buffer,
 	struct bier6_dev *dev;
 	char *buf = NULL;
 	char *tokens[10];
-	struct in6_addr prefix, addr;
-	unsigned long int bit;
-	struct bier6_prefix *p;
-	u8 create, plen;
+	struct in6_addr addr, dst;
+	u8 add, plen;
 	int err = 0;
 
 	if (!(buf = kmalloc(sizeof(char) * (count + 1), GFP_KERNEL)))
@@ -116,37 +105,18 @@ static ssize_t bier6_dev_write(struct file *file, const char __user *buffer,
 		}
 
 		if(!strcmp(tokens[2], "add") || !strcmp(tokens[2], "del")) {
-			if(!tokens[3] || ipv6_parse_prefix(tokens[3], &prefix, &plen)) {
+			if(!tokens[3] || ipv6_parse_prefix(tokens[3], &addr, &plen)) {
 				err = -EINVAL;
 				goto out;
 			}
-
-			create = !strcmp(tokens[2], "add");
-			prefix_canonize(&prefix, plen);
-			if(!(p = bier6_rib_prefix_goc(dev, &prefix, plen, create))) {
-				err = create?-ENOMEM:0;
-				goto out;
-			}
-
-			if(!create)
-				bier6_rib_prefix_del(dev, p);
-
-		} else if(!strcmp(tokens[2], "set")) {
-			if(!tokens[5] ||
-					ipv6_parse_prefix(tokens[3], &prefix, &plen) ||
-					kstrtoul(tokens[4], 10, &bit) || bit + plen >= 128 ||
-					((create = !!strcmp(tokens[5], "null")) &&
-							ipv6_parse_prefix(tokens[5], &addr, NULL))) {
+			add = !strcmp(tokens[2], "add");
+			printk("Là1\n");
+			if(add && (!tokens[4] || ipv6_parse_prefix(tokens[4], &dst, NULL))) {
 				err = -EINVAL;
 				goto out;
 			}
-			prefix_canonize(&prefix, plen);
-			if(!(p = bier6_rib_prefix_goc(dev, &prefix, plen, 0))) {
-				err = create?-ENOMEM:-ENOENT;
-				goto out;
-			}
-
-			err = bier6_rib_bit_set(dev, p, bit, create?&addr:NULL);
+			printk("Là2\n");
+			return bier6_rib_set(dev, &addr, plen, add?&dst:NULL);
 		} else {
 			err = -EINVAL;
 		}

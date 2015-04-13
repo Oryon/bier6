@@ -19,14 +19,14 @@
 
 static int bier6_netdev_up(struct net_device *dev)
 {
-	printk("bier6: Device %s is going up.\n", dev->name);
+	printk(KERN_INFO "bier6: Device %s is going up.\n", dev->name);
 	netif_start_queue(dev);
 	return 0;
 }
 
 static int bier6_netdev_down(struct net_device *dev)
 {
-	printk("bier6: Device %s is going down.\n", dev->name);
+	printk(KERN_INFO "bier6: Device %s is going down.\n", dev->name);
 	netif_stop_queue(dev);
 	return 0;
 }
@@ -68,7 +68,7 @@ void bier6_netdev_setup(struct net_device *dev)
 	dev->features = 0;
 	//dev->features = NETIF_F_NETNS_LOCAL;
 // | NETIF_F_NO_CSUM;
-	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
+	dev->flags |= IFF_NOARP | IFF_POINTOPOINT;
 }
 
 static int bier6_netdev_ctrl(struct bier6 *b, char *devname,
@@ -85,29 +85,32 @@ static int bier6_netdev_ctrl(struct bier6 *b, char *devname,
 	if(!create)
 		return -ENODEV;
 
+	err = -ENOMEM;
 	if((*dev = kmalloc(sizeof(**dev), GFP_KERNEL)) == NULL)
-		return -ENOMEM;
+		goto err_kmalloc;
 
 	if (((*dev)->netdev = alloc_netdev(sizeof(*dev),
-			devname, bier6_netdev_setup)) == NULL) {
-		err = -ENOMEM;
+			devname, bier6_netdev_setup)) == NULL)
 		goto err_alloc;
-	}
+
+	(*dev)->bier = b;
+	*((struct bier6_dev **)netdev_priv((*dev)->netdev)) = *dev;
+	INIT_LIST_HEAD(&(*dev)->fib);
+	INIT_LIST_HEAD(&(*dev)->rib);
+	list_add_tail(&(*dev)->le, &b->devices);
 
 	if((err = register_netdev((*dev)->netdev)))
 		goto err_register;
 
-	(*dev)->bier = b;
-	*((struct bier6_dev **)netdev_priv((*dev)->netdev)) = *dev;
-	list_add(&(*dev)->le, &b->devices);
-	INIT_LIST_HEAD(&(*dev)->prefixes);
+	printk(KERN_INFO"Setting up bier6 device: %s\n", devname);
 	return 0;
 
 term:
-	bier6_rib_flush(*dev);
-	list_del(&(*dev)->le);
+	printk(KERN_INFO"Tearing down bier6 device: %s\n", (*dev)->netdev->name);
 	unregister_netdev((*dev)->netdev);
+	bier6_rib_flush(*dev);
 err_register:
+	list_del(&(*dev)->le);
 	free_netdev((*dev)->netdev);
 err_alloc:
 	kfree(*dev);

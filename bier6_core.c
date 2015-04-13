@@ -25,73 +25,41 @@
 
 static struct bier6 bier;
 
-/*
-static int prefix_contains(struct in6_addr *p, u8 plen, struct in6_addr *addr)
+static int bier6_ipv6_output(struct bier6_dev *dev,
+		struct sk_buff *skb, struct bier6_fib_entry *fe)
 {
-	u8 b = plen/8;
-	u8 r = plen%8;
-	return !memcmp(p, addr, b) &&
-			(!r || !( (((u8 *)p)[b] ^ ((u8 *)addr)[b]) & (0xff << (8 - r))));
-}
-*/
-
-void bier6_ipv6_forward(struct bier6_dev *dev,
-		struct bier6_prefix *p, struct in6_addr *daddr,
-		struct sk_buff *old_skb)
-{
-	struct sk_buff *skb;
-	struct bier6_fib_entry *fe;
-	struct rt6_info *rinfo;
-	struct in6_addr daddr2;
-
 	struct flowi6 fl6;
 	struct dst_entry *dst;
+	struct rt6_info *rt;
 
-	list_for_each_entry(fe, &p->fib, le) {
-		if(!(IN6_64(daddr, 0) & IN6_64(&fe->mask, 0)) &&
-				!(IN6_64(daddr, 1) & IN6_64(&fe->mask, 1)))
-			continue;
+	fl6 = (struct flowi6) {
+		.flowi6_oif = fe->device->ifindex,
+		.daddr = fe->nh,
+	};
 
-		printk("Sending a packet maybe with mask %pI6\n", &fe->mask);
-/*
-		if((rinfo = rt6_lookup(dev_net(dev->netdev), &fe->addr, NULL, fe->dev, 0)) == NULL) {
-			printk("Unreachable\n");
-			continue; //Unreachable
-		}
-		*/
-
-		fl6.daddr = fe->addr;
-		fl6.__fl_common.flowic_oif = fe->dev;
-
-		if(!(dst = ip6_route_output(dev_net(dev->netdev), NULL, &fl6)))
-			continue;
-
-		if(!(skb = skb_copy(old_skb, GFP_KERNEL))) {
-			printk("skb_copy failed\n");
-			//dst_release(&rinfo->dst);
-			dst_release(dst);
-			continue;
-		}
-
-		IN6_64(&daddr2, 0) = IN6_64(daddr, 0) & (IN6_64(&fe->mask, 0) | IN6_64(&p->mask, 0));
-		IN6_64(&daddr2, 1) = IN6_64(daddr, 1) & (IN6_64(&fe->mask, 1) | IN6_64(&p->mask, 1));
-
-		printk("Destination set to %pI6 = %pI6 & (%pI6 | %pI6)\n", &daddr2, daddr, &fe->mask, &p->mask);
-		ipv6_hdr(skb)->daddr = daddr2;
-		skb->ip_summed = CHECKSUM_PARTIAL;
-		//skb_dst_set(skb, &rinfo->dst);
-		skb_dst_set(skb, dst);
-		dst_output(skb);
+	dst = ip6_route_output(dev_net(dev->netdev), NULL, &fl6);
+	if (dst->error) {
+		dst_release(dst);
+		return -1;
 	}
 
-	kfree_skb(old_skb);
+	printk("skb_dev: %s dst_dev: %s\n", skb->dev->name, dst->dev->name);
+	rt = container_of(dst, struct rt6_info, dst);
+
+	skb->dev = dst->dev;
+	skb_dst_drop(skb);
+	skb_dst_set(skb, dst);
+	dst_output(skb);
+	return 0;
 }
 
 void bier6_ipv6_input(struct bier6_dev *dev, struct sk_buff *old_skb)
 {
-	struct in6_addr daddr = ipv6_hdr(old_skb)->daddr;
-	struct bier6_prefix *p;
+	struct in6_addr daddr = ipv6_hdr(old_skb)->daddr, daddr2;
+	struct bier6_fib_entry *fe;
+	struct sk_buff *skb;
 
+	printk(KERN_ERR "bier6_ipv6_input\n");
 	if (ipv6_hdr(old_skb)->hop_limit <= 1) {
 		/* Force OUTPUT device used as source address */
 		//old_skb->dev = dst->dev;
@@ -101,19 +69,32 @@ void bier6_ipv6_input(struct bier6_dev *dev, struct sk_buff *old_skb)
 	}
 	ipv6_hdr(old_skb)->hop_limit--;
 
-	list_for_each_entry(p, &dev->prefixes, le) {
-		printk("(%pI6 ^ %pI6) & %pI6\n", &daddr, &p->prefix, &p->mask);
-		if(((IN6_64(&daddr, 0) ^ IN6_64(&p->prefix, 0)) &
-				IN6_64(&p->mask, 0)) ||
-			((IN6_64(&daddr, 1) ^ IN6_64(&p->prefix, 1)) &
-				IN6_64(&p->mask, 1)))
+	list_for_each_entry(fe, &dev->fib, le) {
+		//Test if destination in fib prefix
+		if(((IN6_64(&daddr, 0) ^ IN6_64(&fe->addr, 0)) & IN6_64(&fe->mask, 0)) ||
+				((IN6_64(&daddr, 1) ^ IN6_64(&fe->addr, 1)) & IN6_64(&fe->mask, 1)))
 			continue;
 
-		bier6_ipv6_forward(dev, p, &daddr, old_skb);
-		return;
+		IN6_64(&daddr2, 0) = IN6_64(&daddr, 0) & IN6_64(&fe->addr, 0);
+		IN6_64(&daddr2, 1) = IN6_64(&daddr, 1) & IN6_64(&fe->addr, 1);
+
+		//Test if there are bits set to 1
+		if(!(IN6_64(&daddr2, 0) & ~IN6_64(&fe->mask, 0)) &&
+				!(IN6_64(&daddr2, 1) & ~IN6_64(&fe->mask, 1)))
+			continue;
+
+		if(!(skb = skb_copy(old_skb, GFP_KERNEL))) {
+			printk("skb_copy failed\n");
+			continue;
+		}
+
+		memcpy(&ipv6_hdr(skb)->daddr, &daddr2, sizeof(struct in6_addr));
+		skb->ip_summed = CHECKSUM_PARTIAL;
+
+		if(bier6_ipv6_output(dev, skb, fe))
+			kfree_skb(skb);
 	}
 
-	//Dropping packet
 	kfree_skb(old_skb);
 }
 
